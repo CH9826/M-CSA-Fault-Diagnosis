@@ -1,0 +1,3 @@
+_ViT_train2_1.py/ViT_Model_1.py - 设备
+_ViT_train2_2.pyViT_Model_2.py - 系统
+
