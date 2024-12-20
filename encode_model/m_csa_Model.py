@@ -31,8 +31,8 @@ def plot_confusion_matrix(matrix, classes, savename):
     ax.set_yticklabels([''] + classes)
     #ax.set_xlabel('Predicted label')
     #ax.set_ylabel('True label')
-    ax.set_xlabel('诊断的故障标签',color='w')
-    ax.set_ylabel('真实的故障标签',color='w')
+    ax.set_xlabel('Diagnostic fault label',color='w')
+    ax.set_ylabel('Real fault labels',color='w')
     plt.tick_params(axis='x',colors='w')
     plt.tick_params(axis='y',colors='w')
     #ax.patch.set_facecolor('greenyellow')
@@ -120,7 +120,7 @@ class M_CSA(nn.Module):
 #         attention_output = F.relu(attention_output)  
         output = self.fc(attention_output)  # 使用正确的线性层名称  
 
-        return output
+        return output,attention_output
 
 
 class FeedForward(nn.Module):

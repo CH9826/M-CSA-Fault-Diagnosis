@@ -4,6 +4,7 @@ import torch.optim as optim
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt  
+import time
 
 from sklearn.manifold import TSNE
 from model.m_csa_Model import *
@@ -56,7 +57,8 @@ def train_m_csa(seq_len, patch_size, num_classes, dim, depth, heads, mlp_dim, dr
     all_epoch_accuracies = []  
     all_epoch_val_losses = []  
     all_epoch_val_accuracies = [] 
-
+    
+    start_time = time.time()
     for epoch in range(epochs):
         true_labels = []
         pred_labels = []
@@ -68,7 +70,7 @@ def train_m_csa(seq_len, patch_size, num_classes, dim, depth, heads, mlp_dim, dr
             data = data.to(device)
             label = label.to(device)
 
-            output = m_csa_model(data)  # [16, 10, 10]
+            output,token = m_csa_model(data)  # [16, 10, 10]
 #             output = vit_model(output)  # [16, 3]
 
             label = label - 1
@@ -94,7 +96,7 @@ def train_m_csa(seq_len, patch_size, num_classes, dim, depth, heads, mlp_dim, dr
                 data = data.to(device)
                 label = label.to(device)
 
-                val_output = m_csa_model(data)
+                val_output,token = m_csa_model(data)
 #                 val_output = vit_model(output)
                 label = label - 1
                 val_loss = criterion(val_output, label)
@@ -112,10 +114,13 @@ def train_m_csa(seq_len, patch_size, num_classes, dim, depth, heads, mlp_dim, dr
         all_epoch_val_accuracies.append(epoch_val_accuracy.item())   
         
         print(f"Epoch : {epoch+1} - loss : {epoch_loss:.4f} - acc: {epoch_accuracy:.4f} - val_loss : {epoch_val_loss:.4f} - val_acc: {epoch_val_accuracy:.4f}\n")
+    end_time = time.time()  
+    training_duration = end_time - start_time  
+    print(f"Training duration: {training_duration:.2f} seconds")
 
     # 保存模型
-    torch.save(m_csa_model.state_dict(), './saved_model/ViT/m_csa_model_parameters.pth')
-#     torch.save(vit_model.state_dict(), './saved_model/ViT/vit_model_parameters.pth')
+    torch.save(m_csa_model.state_dict(), './saved_model/model/m_csa/m_csa_model_parameters.pth')
+
     # TODO 从gpu取回数据
     if torch.cuda.is_available():
         true_labels = [true_labels[i].cpu().numpy() for i in range(0, len(true_labels))]
@@ -124,18 +129,35 @@ def train_m_csa(seq_len, patch_size, num_classes, dim, depth, heads, mlp_dim, dr
     true_labels = np.concatenate(true_labels)
     pred_labels = np.concatenate(pred_labels)
     conf_mat = confusion_matrix(true_labels, pred_labels)
-    plot_confusion_matrix(conf_mat, ['故障1', '故障2', '故障3'], './result/m_csa/confusion_matrix.png')
+    plot_confusion_matrix(conf_mat, ['Normal', 'Fault 1', 'Fault 2', 'Fault 3'], './result/m_csa/confusion_matrix.png')
     # TODO 绘制训练数据tsne图
+    features_for_tsne = []  
+    labels_for_tsne = []  
+  
+    # 在最后一个epoch后，使用模型提取特征  
+    with torch.no_grad():  
+        for data, label in test_loader:  
+            data = data.to(device)  
+            output, token = m_csa_model(data)  
+            features_for_tsne.append(output.cpu())  
+            labels_for_tsne.append(label.cpu())  
+  
+    # 拼接所有的特征和标签  
+    features_for_tsne = torch.cat(features_for_tsne)  
+    labels_for_tsne = torch.cat(labels_for_tsne)  
+  
+    # 使用t-SNE进行降维  
     tsne = TSNE(n_components=2, random_state=0)  
-    X_tsne = tsne.fit_transform(X_test)  # 对测试数据进行t-SNE降维  
-      
+    X_tsne = tsne.fit_transform(features_for_tsne.numpy())  # 注意转换为numpy数组  
+  
+    # 绘制t-SNE图  
     plt.figure(figsize=(8, 6))  
-    scatter = plt.scatter(X_tsne[:, 0], X_tsne[:, 1], c=y_test)  # 使用真实标签进行着色  
+    scatter = plt.scatter(X_tsne[:, 0], X_tsne[:, 1], c=labels_for_tsne.numpy())  # 使用真实标签进行着色  
     plt.colorbar(scatter)  
-    plt.title('t-SNE visualization of test data')  
-    plt.savefig('./result/m_csa/tsne_plot_test.png')  # 保存t-SNE图  
-    plt.show() 
-    
+    plt.title('t-SNE visualization of test data features')  
+    plt.savefig('./result/m_csa/tsne_plot_test_features.png')  # 保存t-SNE图  
+    plt.show()  
+
     return all_epoch_losses, all_epoch_val_losses, all_epoch_accuracies, all_epoch_val_accuracies
 
 
@@ -144,6 +166,9 @@ def test_m_csa(m_csa_model, epochs, criterion, val_loader, device):
     test_loader = val_loader
     m_csa_model.eval()
 #     vit_model.eval()
+
+    predictions = []  
+    true_labels = []  
 
     val_bar = tqdm(val_loader)
 
@@ -155,7 +180,7 @@ def test_m_csa(m_csa_model, epochs, criterion, val_loader, device):
             data = data.to(device)
             label = label.to(device)
 
-            val_output = m_csa_model(data)
+            val_output,token = m_csa_model(data)
 #             val_output = vit_model(output)
             label = label - 1
             val_loss = criterion(val_output, label)
@@ -163,8 +188,14 @@ def test_m_csa(m_csa_model, epochs, criterion, val_loader, device):
             acc = (val_output.argmax(dim=1) == label).float().mean()
             epoch_val_accuracy += acc / len(test_loader)
             epoch_val_loss += val_loss / len(test_loader)
+            
+            predictions.extend(val_output.argmax(dim=1).cpu().numpy())  
+            true_labels.extend(label.cpu().numpy())  
+    
+    print("Predictions:", predictions)  
+    # print("True Labels:", true_labels) 
 
-    return epoch_val_loss, epoch_val_accuracy
+    return epoch_val_loss, epoch_val_accuracy, predictions
 
 
 def data_loader(data_path, label_true):
